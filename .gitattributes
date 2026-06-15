@@ -1,0 +1,21 @@
+# Enforce LF line endings for all text files
+* text=auto eol=lf
+
+# C source and headers
+*.c text eol=lf
+*.h text eol=lf
+
+# Build system
+CMakeLists.txt text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# Scripts
+*.sh text eol=lf
+
+# Binary files — no line ending conversion
+*.o binary
+*.a binary
+*.so binary

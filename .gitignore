@@ -1,0 +1,36 @@
+# Editor and OS artifacts
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+
+# CMake build directory
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Compiled output
+*.o
+*.a
+*.so
+*.so.*
+
+# Binaries produced by the build
+rtss_ota
+rtssdbg
+rtss_console
+
+# Shared library symlinks
+lib/
+
+# CMake generated
+Makefile

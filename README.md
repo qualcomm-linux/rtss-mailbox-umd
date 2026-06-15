@@ -1,47 +1,156 @@
-**After repository creation:**
-- [ ] Update this `README.md`. Update the Project Name, description, and all sections. Remove this checklist.
-- [ ] If required, update `LICENSE.txt` and the License section with your project's approved license
-- [ ] Search this repo for "REPLACE-ME" and update all instances accordingly
-- [ ] Update `CONTRIBUTING.md` as needed
-- [ ] Review the workflows in `.github/workflows`, updating as needed. See https://docs.github.com/en/actions for information on what these files do and how they work.
-- [ ] Review and update the suggested Issue and PR templates as needed in `.github/ISSUE_TEMPLATE` and `.github/PULL_REQUEST_TEMPLATE`
+# rtss-mailbox-umd
 
-# Project Name
+RTSS Mailbox User Space package of libraries, demo applications, and utilities
+for Qualcomm® Automotive, IE-IoT, and Robotics SoCs.
 
-*\<update with your project name and a short description\>*
-
-Project that does ... implemented in ... runs on Qualcomm® *\<processor\>*
+Provides the userspace middleware for the RTSS (Real-Time SubSystem) mailbox
+IPC channel. The companion kernel driver (`rtss-mailbox-kmd`) exposes the
+IPC interrupt path and the physical shared-memory carveout via `/dev/rtssmb`.
+This package provides the userspace libraries that manage the ring-buffer
+layout within that carveout, enabling structured message exchange between
+the application processor (Linux) and RTSS.
 
 ## Branches
 
-**main**: Primary development branch. Contributors should develop submissions based on this branch, and submit pull requests to this branch.
+| Branch | Purpose |
+|--------|---------|
+| `main` | Primary development branch. All contributions target this branch. |
+| `rtss-mailbox-usr.le.0.0` | LE product release branch. Tracks validated releases for Qualcomm LE platforms. |
+
+## Components
+
+| Component | Path | Description |
+|-----------|------|-------------|
+| Mailbox middleware | `middleware/mailbox/` | `librtss_mailbox` — open/read/write/close API over `/dev/rtssmb` |
+| Safe ring-buffer lib | `middleware/safemlib/` | `librtss_safemlib` — shared-memory ring buffer implementation |
+| OTA SDK library | `apps/rtss-ota/lib/` | `librtss_ota` — OTA update protocol over the mailbox channel |
+| OTA demo app | `apps/rtss-ota/demo/` | `rtss_ota` — reference OTA flash/update application |
+| Debug utility | `apps/rtss-dbg/` | `rtssdbg` — command-line mailbox diagnostic and test tool |
+| Console utility | `apps/rtss-console/` | `rtss_console` — prints RTSS log output to stdout |
+| Public API header | `api/rtss_mailbox_api.h` | Channel open/read/write/close API exposed to applications |
 
 ## Requirements
 
-List requirements to run the project, how to install them, instructions to use docker container, etc...
+- Linux kernel with `rtss-mailbox-kmd` DLKM loaded (`/dev/rtssmb` present)
+- Qualcomm SoC with RTSS: qcs9100 / qcs9075 / qcs8300 / qcs8275
+- Yocto build environment **or** `aarch64-qcom-linux` cross-compiler (GCC 13+)
+- CMake ≥ 3.10
 
-## Installation Instructions
+## Build Instructions
 
-How to install the software itself.
+### Yocto (recommended)
+
+```bash
+source <poky>/oe-init-build-env <build-dir>
+MACHINE=qcs9100 bitbake qcom-rtss-mailbox-umd
+```
+
+Packages produced:
+
+| Package | Contents |
+|---------|----------|
+| `qcom-rtss-mailbox-umd` | `librtss_mailbox.so`, `librtss_safemlib.so` |
+| `qcom-rtss-mailbox-umd-dev` | Headers + `.so` symlinks |
+| `qcom-rtss-mailbox-umd-staticdev` | `.a` static libraries |
+| `qcom-rtss-ota` | `librtss_ota.so`, `rtss_ota` binary |
+| `qcom-rtss-mailbox-umd-utils` | `rtssdbg`, `rtss_console` |
+
+### Standalone CMake
+
+```bash
+git clone https://github.com/qualcomm-linux/rtss-mailbox-umd.git
+cd rtss-mailbox-umd
+cmake -B build \
+    -DSYSROOTINC_PATH=<sysroot with rtss_mailbox_uapi.h> \
+    -DCMAKE_C_COMPILER=aarch64-qcom-linux-gcc
+cmake --build build
+```
+
+`SYSROOTINC_PATH` must point to a sysroot where `rtss_mailbox_uapi.h` has
+been installed from `rtss-mailbox-kmd` via `make headers_install`.
+
+**Optional CMake flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-DRTSS_DEBUG_PRINT=ON/OFF` | ON | stdout/console logging (ON) or syslog (OFF) |
+| `-DRTSS_LOG_LEVEL=N` | 4 | Verbosity: 0=none 1=err 2=warn 3=info 4=dbg (all) |
 
 ## Usage
 
-Describe how to use the project.
+```c
+#include "rtss_mailbox_api.h"
+
+struct rtss_mb_handle tx, rx;
+
+/* Open TX and RX channels */
+int ret = rtss_mb_open(&tx, "/dev/sail/ota0");
+if (ret < 0) {
+    if (ret == -EAGAIN)  /* RTSS not up yet — retry */
+        ...
+}
+rtss_mb_open(&rx, "/dev/sail/ota1");
+
+/* Write data to RTSS */
+ret = rtss_mb_write(&tx, buf, sz);
+/* returns bytes written, or -ENOBUFS if ring full */
+
+/* Read data from RTSS (blocking) */
+ret = rtss_mb_read(&rx, buf, sz);
+/* returns bytes read, or -EINTR if signal received */
+
+rtss_mb_close(&tx);
+rtss_mb_close(&rx);
+```
+
+See `api/rtss_mailbox_api.h` for the full API and all `-errno` error codes.
+
+## Architecture
+
+### Current
+
+The KMD exposes a single `/dev/rtssmb` misc device. All channels (TX/RX pairs)
+are multiplexed through this node using IOCTL signal numbers. The UMD middleware
+manages the ring-buffer layout within the shared-memory carveout mapped from
+this device.
+
+### Planned
+
+Middleware and driver architecture improvements are planned. Existing
+`rtss_mb_*` API compatibility will be maintained; applications may migrate
+to new interfaces as they become available.
+
+## API Error Codes
+
+`rtss_mb_*` functions return `0` on success and a negative errno value on failure:
+
+| Code | Function | Meaning |
+|------|----------|---------|
+| `-EAGAIN` | `open` | RTSS not up yet — retry `rtss_mb_open` |
+| `-ENOENT` | `open` | Channel name not found in mailbox descriptor |
+| `-ENOBUFS` | `write` | Ring buffer full — back off and retry |
+| `-EMSGSIZE` | `read` | Caller buffer smaller than one item — reallocate and retry |
+| `-EINTR` | `read` | Signal received while blocked — retry or exit |
+| `-ECONNRESET` | `read` | Channel closed concurrently — clean shutdown |
+| `-EPERM` | `read`/`write` | Wrong channel direction |
+| `-EBADF` | `read`/`write`/`close` | Handle not open |
+| `-EIO` | any | Unrecoverable device or ring error — re-open required |
 
 ## Development
 
-How to develop new features/fixes for the software. Maybe different than "usage". Also provide details on how to contribute via a [CONTRIBUTING.md file](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to submit patches and pull requests.
+
+Coding style follows the Linux kernel C style (K&R braces, tabs, 80-column
+soft limit) consistent with the companion `rtss-mailbox-kmd` kernel module.
 
 ## Getting in Contact
 
-How to contact maintainers. E.g. GitHub Issues, GitHub Discussions could be indicated for many cases. However a mail list or list of Maintainer e-mails could be shared for other types of discussions. E.g.
-
-* [Report an Issue on GitHub](../../issues)
-* [Open a Discussion on GitHub](../../discussions)
-* [E-mail us](mailto:REPLACE-ME@qti.qualcomm.com) for general questions
+- [Report an Issue on GitHub](../../issues)
+- [Open a Discussion on GitHub](../../discussions)
+- [Security issues](mailto:product-security@qualcomm.com)
 
 ## License
 
-*\<update with your project name and license\>*
-
-*\<REPLACE-ME\>* is licensed under the [BSD-3-clause License](https://spdx.org/licenses/BSD-3-Clause.html). See [LICENSE.txt](LICENSE.txt) for the full license text.
+`rtss-mailbox-umd` is licensed under the
+[BSD-3-Clause License](https://spdx.org/licenses/BSD-3-Clause.html).
+See [LICENSE.txt](LICENSE.txt) for the full license text.
