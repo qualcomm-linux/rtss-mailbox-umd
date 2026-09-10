@@ -1,0 +1,41 @@
+# Editor and OS artifacts
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+
+# CMake build directory
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Compiled output
+*.o
+*.a
+*.so
+*.so.*
+
+# Binaries produced by the build
+rtss_dbg
+rtss_console
+rtss_mbdemo
+rtss_updater
+
+# Local-testing-only firmware placeholders, not part of the repo
+apps/rtss-updater/demo/*.elf
+apps/rtss-updater/demo/*.bin
+
+# Shared library symlinks (repo-root build output only, not source apps/*/lib/ dirs)
+/lib/
+
+# CMake generated
+Makefile
